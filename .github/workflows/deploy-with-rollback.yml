@@ -1,0 +1,248 @@
+name: deploy-with-rollback
+
+# Trigger: push para main (deploy de produção) e workflow_dispatch (rollback manual)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Ação a executar"
+        required: true
+        default: "deploy"
+        type: choice
+        options:
+          - deploy
+          - rollback
+      rollback_version:
+        description: "Script Tag / Version ID para rollback (obrigatório se action=rollback)"
+        required: false
+        type: string
+      environment:
+        description: "Ambiente alvo"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  # Timeout máximo de deploy (segundos) antes de triggerar rollback automático
+  HEALTH_CHECK_TIMEOUT: 30
+  HEALTH_CHECK_RETRIES: 5
+
+jobs:
+  # ─── Validação de pré-deploy ───────────────────────────────────────────────
+  pre-deploy-checks:
+    name: Pre-deploy validation
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action != 'rollback'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun run test --run
+
+      - name: Type check
+        run: bun run typecheck || npx tsc --noEmit
+
+  # ─── Deploy para Staging ───────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy → Staging
+    runs-on: ubuntu-latest
+    needs: [pre-deploy-checks]
+    if: github.event.inputs.action != 'rollback'
+    environment:
+      name: staging
+      url: https://signal-radar-staging.workers.dev
+    outputs:
+      deployed_version: ${{ steps.deploy.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Deploy to staging
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          npx wrangler deploy --env staging --var CF_VERSION:${VERSION}
+
+      - name: Health check (staging)
+        run: |
+          URL="https://signal-radar-staging.workers.dev/_health"
+          for i in $(seq 1 ${{ env.HEALTH_CHECK_RETRIES }}); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$URL")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Health check OK (staging) — attempt $i"
+              exit 0
+            fi
+            echo "⏳ Health check attempt $i failed (HTTP $STATUS). Retrying..."
+            sleep 5
+          done
+          echo "❌ Staging health check failed após ${{ env.HEALTH_CHECK_RETRIES }} tentativas"
+          exit 1
+
+  # ─── Deploy para Produção ──────────────────────────────────────────────────
+  deploy-production:
+    name: Deploy → Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/main' && github.event.inputs.action != 'rollback'
+    environment:
+      name: production
+      url: https://signal-radar-prod.workers.dev
+    outputs:
+      deployed_version: ${{ steps.deploy.outputs.version }}
+      previous_version: ${{ steps.get-previous.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Guarda a versão atual ANTES de sobrescrever (para rollback automático)
+      - name: Get current production version
+        id: get-previous
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PREV=$(npx wrangler deployments list --env production --json 2>/dev/null \
+            | jq -r '.[0].id // "unknown"' || echo "unknown")
+          echo "version=${PREV}" >> "$GITHUB_OUTPUT"
+          echo "ℹ️  Versão anterior em produção: ${PREV}"
+
+      - name: Deploy to production
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          npx wrangler deploy --env production --var CF_VERSION:${VERSION}
+
+      - name: Health check (production)
+        id: health
+        run: |
+          URL="https://signal-radar-prod.workers.dev/_health"
+          for i in $(seq 1 ${{ env.HEALTH_CHECK_RETRIES }}); do
+            RESP=$(curl -s --max-time ${{ env.HEALTH_CHECK_TIMEOUT }} "$URL" || echo '{}')
+            OK=$(echo "$RESP" | jq -r '.ok // false')
+            if [ "$OK" = "true" ]; then
+              echo "✅ Production health check OK — attempt $i"
+              exit 0
+            fi
+            echo "⏳ Health check attempt $i failed. Response: $RESP. Retrying..."
+            sleep 6
+          done
+          echo "❌ Production health check falhou após ${{ env.HEALTH_CHECK_RETRIES }} tentativas"
+          exit 1
+
+      # Rollback automático se o health check falhar
+      - name: Auto-rollback on health failure
+        if: failure() && steps.health.outcome == 'failure'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREV_VERSION: ${{ steps.get-previous.outputs.version }}
+        run: |
+          echo "🔄 Health check falhou. Iniciando rollback para ${PREV_VERSION}..."
+          if [ "$PREV_VERSION" = "unknown" ]; then
+            echo "⚠️  Versão anterior desconhecida — rollback manual necessário."
+            exit 1
+          fi
+          npx wrangler rollback --env production "$PREV_VERSION"
+          echo "✅ Rollback concluído para ${PREV_VERSION}"
+
+      - name: Post deployment summary
+        if: success()
+        run: |
+          echo "## ✅ Deploy concluído" >> $GITHUB_STEP_SUMMARY
+          echo "- **Versão:** ${{ steps.deploy.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Versão anterior (para rollback manual):** ${{ steps.get-previous.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ambiente:** production" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health check:** OK" >> $GITHUB_STEP_SUMMARY
+
+  # ─── Rollback Manual ───────────────────────────────────────────────────────
+  manual-rollback:
+    name: Manual Rollback
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'rollback'
+    environment:
+      name: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate rollback target
+        run: |
+          if [ -z "${{ github.event.inputs.rollback_version }}" ]; then
+            echo "❌ rollback_version é obrigatório para action=rollback"
+            echo "Use: wrangler deployments list --env ${{ github.event.inputs.environment }} para listar versões disponíveis"
+            exit 1
+          fi
+          echo "🔍 Alvo de rollback: ${{ github.event.inputs.rollback_version }}"
+
+      - name: Execute rollback
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          VERSION="${{ github.event.inputs.rollback_version }}"
+          echo "🔄 Fazendo rollback do ambiente ${ENV} para versão ${VERSION}..."
+          npx wrangler rollback --env "${ENV}" "${VERSION}"
+          echo "✅ Rollback concluído"
+
+      - name: Health check pós-rollback
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          if [ "$ENV" = "production" ]; then
+            URL="https://signal-radar-prod.workers.dev/_health"
+          else
+            URL="https://signal-radar-staging.workers.dev/_health"
+          fi
+          sleep 5
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$URL")
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ Health check OK após rollback (HTTP $STATUS)"
+          else
+            echo "⚠️  Health check retornou HTTP $STATUS após rollback — investigar manualmente"
+          fi
+
+      - name: Rollback summary
+        run: |
+          echo "## 🔄 Rollback Concluído" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ambiente:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Versão alvo:** ${{ github.event.inputs.rollback_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Executado por:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Data/hora:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

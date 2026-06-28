@@ -1,125 +1,163 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  Outlet,
-  Link,
-  createRootRouteWithContext,
-  useRouter,
-  HeadContent,
-  Scripts,
-} from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { Component, type ReactNode, type ErrorInfo, useEffect } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Outlet, createRootRoute } from '@tanstack/react-router';
+import * as Sentry from '@sentry/react';
 
-import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
+import { AuthProvider } from '@/lib/auth';
+import { Toaster } from '@/components/ui/sonner';
+import { backendWs } from '@/adapters/backend/ws-client';
+import { initSentry } from '@/lib/sentry';
+import { logger } from '@/lib/logger';
+import { registerPWA } from '@/lib/pwa/register';
 
-function NotFoundComponent() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-7xl font-bold text-foreground">404</h1>
-        <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          The page you're looking for doesn't exist or has been moved.
-        </p>
-        <div className="mt-6">
-          <Link
-            to="/"
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Go home
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
+initSentry();
+
+const IS_DEV = import.meta.env.DEV;
+
+const SAFE_ERROR_PATTERNS: RegExp[] = [
+  /Missing Supabase environment variable/i,
+  /Variáveis ausentes/i,
+  /API base URL n[ãa]o configurada/i,
+  /Unauthorized/i,
+];
+
+function getSafeErrorMessage(error: Error): string {
+  const msg = error.message || '';
+  if (SAFE_ERROR_PATTERNS.some((p) => p.test(msg))) return msg;
+  return 'Ocorreu um erro inesperado. Nossa equipe foi notificada.';
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
-  const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
-        </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <button
-            onClick={() => {
-              router.invalidate();
-              reset();
+interface EBState {
+  error: Error | null;
+}
+class GlobalErrorBoundary extends Component<{ children: ReactNode }, EBState> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error): EBState {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    logger.error('[GlobalErrorBoundary]', { error, componentStack: info.componentStack });
+    Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
+  }
+  render() {
+    if (this.state.error) {
+      const safeMsg = getSafeErrorMessage(this.state.error);
+      return (
+        <div
+          style={{
+            display: 'flex',
+            minHeight: '100vh',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.5rem',
+            background: '#0a0a0a',
+            fontFamily: 'system-ui, sans-serif',
+          }}
+        >
+          <div
+            style={{
+              maxWidth: '34rem',
+              width: '100%',
+              color: '#fff',
+              background: '#141414',
+              border: '1px solid #2a2a2a',
+              borderRadius: '0.75rem',
+              padding: '2rem',
             }}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Try again
-          </button>
-          <a
-            href="/"
-            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            Go home
-          </a>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div
+                style={{
+                  width: '2.5rem',
+                  height: '2.5rem',
+                  borderRadius: '0.5rem',
+                  background: '#ef444422',
+                  color: '#ef4444',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.25rem',
+                }}
+              >
+                ⚠
+              </div>
+              <h1 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>
+                Erro ao inicializar
+              </h1>
+            </div>
+            <p style={{ fontSize: '0.875rem', color: '#a3a3a3', lineHeight: 1.6, marginTop: 0 }}>
+              {safeMsg}
+            </p>
+            {IS_DEV && (
+              <pre
+                style={{
+                  marginTop: '1rem',
+                  padding: '0.75rem',
+                  background: '#0a0a0a',
+                  borderRadius: '0.375rem',
+                  fontSize: '0.75rem',
+                  color: '#f87171',
+                  overflow: 'auto',
+                }}
+              >
+                {this.state.error.stack}
+              </pre>
+            )}
+            <button
+              style={{
+                marginTop: '1.5rem',
+                padding: '0.5rem 1rem',
+                background: '#1f1f1f',
+                border: '1px solid #3a3a3a',
+                color: '#fff',
+                borderRadius: '0.375rem',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+              }}
+              onClick={() => window.location.reload()}
+            >
+              Recarregar
+            </button>
+          </div>
         </div>
-      </div>
-    </div>
-  );
+      );
+    }
+    return this.props.children;
+  }
 }
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
-    ],
-    links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
-    ],
-  }),
-  shellComponent: RootShell,
-  component: RootComponent,
-  notFoundComponent: NotFoundComponent,
-  errorComponent: ErrorComponent,
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+    },
+  },
 });
 
-function RootShell({ children }: { children: ReactNode }) {
-  return (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  );
-}
+export const Route = createRootRoute({
+  component: RootComponent,
+});
 
 function RootComponent() {
-  const { queryClient } = Route.useRouteContext();
+  useEffect(() => {
+    registerPWA();
+    // Pré-conecta o WebSocket assim que o usuário estiver autenticado
+    // (backendWs.connect() verifica internamente se há token)
+    backendWs.connect('/ws');
+  }, []);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
-    </QueryClientProvider>
+    <GlobalErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <Outlet />
+          <Toaster richColors position="top-right" />
+        </AuthProvider>
+      </QueryClientProvider>
+    </GlobalErrorBoundary>
   );
 }
