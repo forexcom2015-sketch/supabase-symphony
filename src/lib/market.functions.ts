@@ -98,3 +98,20 @@ export async function getFearGreed(): Promise<FearGreedDTO | null> {
     return null;
   }
 }
+
+export interface MarketSnapshot {
+  prices: Record<string, CoinPriceDTO>;
+  global: GlobalMetricsDTO | null;
+  fearGreed: FearGreedDTO | null;
+}
+
+export async function getMarketSnapshot(): Promise<MarketSnapshot> {
+  const [coins, global, fearGreed] = await Promise.all([
+    getCoinPrices(),
+    getGlobalMetrics(),
+    getFearGreed(),
+  ]);
+  const prices: Record<string, CoinPriceDTO> = {};
+  for (const c of coins) prices[c.symbol] = c;
+  return { prices, global, fearGreed };
+}
