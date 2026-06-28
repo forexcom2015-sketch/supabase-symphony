@@ -179,7 +179,6 @@ const AuthenticatedBot4xOnboardingRoute =
     path: '/onboarding',
     getParentRoute: () => AuthenticatedBot4xRoute,
   } as any)
-
 const AuthenticatedCalibratorHistoryIdRoute =
   AuthenticatedCalibratorHistoryIdRouteImport.update({
     id: '/$id',
@@ -373,7 +372,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
-  TermsRoute: typeof TermsRoute: typeof
+  TermsRoute: typeof TermsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -672,7 +671,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
-  TermsRoute: TermsRoute,:
+  TermsRoute: TermsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
