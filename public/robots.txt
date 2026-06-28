@@ -1,0 +1,38 @@
+# Signal Radar — robots.txt
+# Indexar apenas páginas públicas; bloquear todas as rotas autenticadas.
+
+User-agent: *
+
+# Páginas públicas (permitidas)
+Allow: /$
+Allow: /login
+Allow: /terms
+Allow: /privacy
+
+# Rotas autenticadas — não indexar
+Disallow: /dashboard
+Disallow: /signals
+Disallow: /bot4x
+Disallow: /calibrator
+Disallow: /dna-trader
+Disallow: /dna-pairs
+Disallow: /dna-corrections
+Disallow: /copy-trading
+Disallow: /manipulation
+Disallow: /sentiment
+Disallow: /marketplace
+Disallow: /api
+Disallow: /alerts
+Disallow: /profile
+Disallow: /settings
+Disallow: /onboarding
+Disallow: /pricing
+Disallow: /admin
+Disallow: /diagnostics
+
+# Rotas de sistema
+Disallow: /_serverFn/
+Disallow: /~oauth
+Disallow: /_health
+
+Sitemap: https://aisignalradar.com/sitemap.xml
