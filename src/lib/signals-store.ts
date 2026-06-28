@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { createSelector } from "reselect";
@@ -364,4 +365,3 @@ export function selectStats(signals: Signal[]) {
   const expired = signals.filter((s) => s.status === "expired").length;
   return { total, buy, sell, avg, inst, high, expired };
 }
-

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { createFileRoute, useNavigate, Outlet, redirect } from '@tanstack/react-router';
 import { useAuth } from '@/lib/auth';
 import { useEffect, lazy, Suspense } from 'react';

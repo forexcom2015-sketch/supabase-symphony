@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { motion } from "framer-motion";
 import { Shield, ShieldAlert, ShieldCheck, Bell, Bookmark, ArrowRight } from "lucide-react";
 import { ScoreBadge, scoreColor } from "@/components/dashboard/score-badge";

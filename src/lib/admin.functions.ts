@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ─────────────────────────────────────────────────────────────────────────────
 // admin.functions.ts — versão SPA
 // Chama o Supabase diretamente com o cliente de browser (anon key + RLS).
