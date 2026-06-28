@@ -105,7 +105,8 @@ function deriveAssetClass(symbol: string): AssetClass {
   return "Crypto";
 }
 
-export const useSignalsStore = create<State>((set, get) => ({ — sinais reais chegam via syncFromBackend()/WS.
+// Sinais reais chegam via syncFromBackend()/WS.
+export const useSignalsStore = create<State>((set, get) => ({
   // Em dev os mocks são carregados em init() via import dinâmico (tree-shaken
   // do bundle de produção).
   signals: [],
