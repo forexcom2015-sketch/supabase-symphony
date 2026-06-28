@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.inputs.action != 'rollback'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -66,7 +66,7 @@ jobs:
     outputs:
       deployed_version: ${{ steps.deploy.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -113,7 +113,7 @@ jobs:
       deployed_version: ${{ steps.deploy.outputs.version }}
       previous_version: ${{ steps.get-previous.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -194,7 +194,7 @@ jobs:
     environment:
       name: ${{ github.event.inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
