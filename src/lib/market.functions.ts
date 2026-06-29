@@ -3,6 +3,7 @@
 // Faz fetch direto das APIs públicas no browser.
 // ─────────────────────────────────────────────────────────────────────────────
 import { logger } from '@/lib/logger';
+import { supabase } from '@/integrations/supabase/client';
 
 const COIN_IDS = [
   'bitcoin', 'ethereum', 'tether', 'binancecoin', 'solana',
@@ -49,7 +50,12 @@ export async function getCoinPrices(): Promise<CoinPriceDTO[]> {
   try {
     const base = (import.meta.env.VITE_API_URL as string | undefined) || '';
     const url = `${base}/api/prices?vs_currency=usd&ids=${COIN_IDS}&order=market_cap_desc&per_page=20&page=1&price_change_percentage=24h&sparkline=false`;
-    const res = await fetch(url);
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string, string> = {};
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
+    }
+    const res = await fetch(url, { headers });
     if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
     const data = await res.json();
     return (data as any[]).map((c) => ({
@@ -72,7 +78,12 @@ export async function getCoinPrices(): Promise<CoinPriceDTO[]> {
 export async function getGlobalMetrics(): Promise<GlobalMetricsDTO | null> {
   try {
     const base = (import.meta.env.VITE_API_URL as string | undefined) || '';
-    const res = await fetch(`${base}/api/prices`);
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string, string> = {};
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
+    }
+    const res = await fetch(`${base}/api/prices`, { headers });
     if (!res.ok) throw new Error(`CoinGecko global ${res.status}`);
     const { data } = await res.json();
     return {
