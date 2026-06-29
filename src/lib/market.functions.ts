@@ -3,6 +3,7 @@
 // Faz fetch direto das APIs públicas no browser.
 // ─────────────────────────────────────────────────────────────────────────────
 import { logger } from '@/lib/logger';
+import { supabase } from '@/integrations/supabase/client';
 
 const COIN_IDS = [
   'bitcoin', 'ethereum', 'tether', 'binancecoin', 'solana',
