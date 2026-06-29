@@ -47,7 +47,8 @@ export interface FearGreedDTO {
 
 export async function getCoinPrices(): Promise<CoinPriceDTO[]> {
   try {
-    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${COIN_IDS}&order=market_cap_desc&per_page=20&page=1&price_change_percentage=24h&sparkline=false`;
+    const base = (import.meta.env.VITE_API_URL as string | undefined) || '';
+    const url = `${base}/api/prices?vs_currency=usd&ids=${COIN_IDS}&order=market_cap_desc&per_page=20&page=1&price_change_percentage=24h&sparkline=false`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
     const data = await res.json();
